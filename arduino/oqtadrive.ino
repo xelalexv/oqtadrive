@@ -828,7 +828,7 @@ uint16_t receiveBlock() {
 
 			// wait for start of cycle, or end of block
 			// skipped when coming here for the first time
-			for (w = 0xff; (((PINC & MASK_BOTH_TRACKS) ^ start) == 0) && w > 0; w--);
+			for (w = 0x7f; (((PINC & MASK_BOTH_TRACKS) ^ start) == 0) && w > 0; w--);
 
 			if (w == 0) { // end of block
 				interrupts();
