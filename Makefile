@@ -79,6 +79,9 @@ endif
 
 FQBN ?= arduino:avr:nano
 
+UNATT_ROOT := /home/alex/tmp
+UNATT_SRC := hack/unattended/raspberrypi
+
 export
 
 #
@@ -109,6 +112,36 @@ ifeq ($(shell docker images --digests --quiet $(ARDUINO_CLI_IMAGE)),)
 		-f ./hack/arduino-cli.Dockerfile .
 	echo "image build done"
 endif
+
+
+.PHONY: imgsetup_raspberrypi
+imgsetup_raspberrypi:
+#	build the unattended setup image for standalone with ${ITL}RaspberryPi${NRM}
+#
+	# TODO getting partition start: fdisk -l -o Start --bytes
+	#
+	# FIXME file ownership
+	# boot
+	touch $(UNATT_BOOT)/ssh
+	cp $(UNATT_SRC)/wpa_supplicant.conf $(UNATT_BOOT)/
+	echo "pi:$(shell echo 'oqtadrive' | openssl passwd -6 -stdin)" \
+		> $(UNATT_BOOT)/userconf.txt
+	grep --silent "enable_uart=1" $(UNATT_BOOT)/config.txt \
+		|| { \
+			sed -i '/^[all]$$/d' $(UNATT_BOOT)/config.txt; \
+			echo -e "[all]\nenable_uart=1" >> $(UNATT_BOOT)/config.txt; \
+		}
+	sed -i 's/console=serial0,115200 //g' $(UNATT_BOOT)/cmdline.txt
+	# root
+	grep --silent "# OqtaDrive bootstrapper" $(UNATT_ROOT)/etc/rc.local \
+		|| { \
+			sed -i '/^exit 0$$/d' $(UNATT_ROOT)/etc/rc.local; \
+			cat $(UNATT_SRC)/rc.local >> $(UNATT_ROOT)/etc/rc.local; \
+		}
+	cp hack/Makefile $(UNATT_ROOT)/home/pi/
+	mkdir $(UNATT_ROOT)/home/pi/repo
+	mkdir $(UNATT_ROOT)/home/pi/oqtadrive
+	cp $(UNATT_SRC)/config.h $(UNATT_ROOT)/home/pi/oqtadrive/
 
 
 .PHONY: firmware

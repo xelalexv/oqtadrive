@@ -1,0 +1,7 @@
+# OqtaDrive bootstrapper
+su - pi -c bash -c "cd /home/pi; [[ -f .unattended_setup_completed ]] || \
+    REPO=/home/pi/repo PORT=/dev/ttyS0 BAUD_RATE=1000000 OLD_NANO=n RESET_PIN=18 FQBN=arduino:avr:nano make unattended_setup"
+
+/sbin/iwconfig wlan0 power off
+
+exit 0
