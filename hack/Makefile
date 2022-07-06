@@ -123,7 +123,7 @@ ifeq ($(OLD_NANO),y)
 	FQBN = arduino:avr:nano:cpu=atmega328old
 endif
 
-BASE_URL := https://github.com/xelalexv/oqtadrive/raw
+BASE_URL := https://codeberg.org/xelalexv/oqtadrive/raw
 BRANCH ?= master
 
 define unattended_settings

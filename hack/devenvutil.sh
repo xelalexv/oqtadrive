@@ -137,7 +137,7 @@ function build_binary {
         -e CGO_ENABLED=0 -e GOOS="$2" -e GOARCH="${arch}" ${extra_env} \
         "${GO_IMAGE}" bash -c \
             "go mod tidy && go build -v -tags netgo -installsuffix netgo -ldflags \
-            \"-w -X github.com/xelalexv/oqtadrive/pkg/util.OqtaDriveVersion=${OQTADRIVE_VERSION}\" \
+            \"-w -X codeberg.org/xelalexv/oqtadrive/pkg/util.OqtaDriveVersion=${OQTADRIVE_VERSION}\" \
             -o \"${binary}\" \"./cmd/$1/\""
 
     local specifier="_${OQTADRIVE_RELEASE}_$2_${arch}"
@@ -181,7 +181,7 @@ function download_oqtactl {
     local marker="${os,,}_${arch}"
     local url
 
-    if [[ -z "${BUILD_URL}" ]]; then # get form GitHub release page
+    if [[ -z "${BUILD_URL}" ]]; then # get from release page
         url="$(get_asset_url "${marker}.zip")"
 
     else # get from custom build page
@@ -190,13 +190,13 @@ function download_oqtactl {
             | cut -d '"' -f 8)" && url="${BUILD_URL}/${url}"
     fi
 
-    if [[ -z "${url}" || ! ${url} =~ ${marker} ]]; then
+    if [[ -z "${url}" ]]; then
         echo -e \
             "\nNo download available for architecture '${arch}' on OS '${os}' in version '$(version_label "${VERSION}")'.\n" >&2
         return 1
     fi
 
-    mv -f "${OQTACTL}" "${OQTACTL}.bak"
+    [[ ! -f "${OQTACTL}" ]] || mv -f "${OQTACTL}" "${OQTACTL}.bak"
 
     echo "  from ${url}"
     curl -fsSL "${url}" -o oqtactl.zip && \
@@ -218,7 +218,7 @@ function download_ui {
 
     local url
 
-    if [[ -z "${BUILD_URL}" ]]; then # get form GitHub release page
+    if [[ -z "${BUILD_URL}" ]]; then # get from release page
         url="$(get_asset_url ui.zip)"
 
     else # get from custom build page
@@ -227,13 +227,13 @@ function download_ui {
             | cut -d '"' -f 8)" && url="${BUILD_URL}/${url}"
     fi
 
-    if [[ -z "${url}" || ! ${url} =~ ui\.zip ]]; then
+    if [[ -z "${url}" ]]; then
         echo -e "\nNo UI available in version '$(version_label "${VERSION}")'.\n" >&2
         return
     fi
 
     rm -rf "${ROOT}/ui.bak"
-    mv -f "${ROOT}/ui" "${ROOT}/ui.bak"
+    [[ ! -d "${ROOT}/ui" ]] || mv -f "${ROOT}/ui" "${ROOT}/ui.bak"
 
     echo "  from ${url}"
     curl -fsSL "${url}" -o ui.zip && \
@@ -255,7 +255,7 @@ function download_firmware {
 
     local url
 
-    if [[ -z "${BUILD_URL}" ]]; then # get form GitHub repo
+    if [[ -z "${BUILD_URL}" ]]; then # get from repo
         [[ -n "${VERSION}" ]] || VERSION="$(get_latest_release)"
         url="${BASE_URL}/${VERSION}/arduino/oqtadrive.ino"
 
@@ -263,7 +263,7 @@ function download_firmware {
         url="${BUILD_URL}/oqtadrive.ino"
     fi
 
-    mv -f "${SKETCH}.org" "${SKETCH}.org.bak"
+    [[ ! -f "${SKETCH}.org" ]] || mv -f "${SKETCH}.org" "${SKETCH}.org.bak"
     echo "  from ${url}"
     curl -fsSL -o "${SKETCH}.org" "${url}" && return 0
 
@@ -287,57 +287,73 @@ function assure_current {
     }
 
     local ld
-    if ld="$(date --reference "$1" --utc --iso-8601=seconds 2>/dev/null)" \
-        && [[ -n "${ld}" ]]; then
-        # add 1 second, because `since` parameter in GitHub `commits` API is >=
-        # also maintain as UTC and keep format expected by API
-        ld="$(date --date="${ld} +1 seconds" --utc --iso-8601=seconds \
-            | cut -d '+' -f 1)Z"
-    else
+    if ! ld="$(to_utc "$1" ref)"; then
         ld="1970-01-01T01:00:00Z"
     fi
 
+    # migration to codeberg: `since` not supported, get all with `path`,
+    # but `limit` is ignored in that case, use first element from array
     local commits
-    if ! commits="$(github_api_call \
-            "commits?path=$1&since=${ld}&sha=${BRANCH}&page=1&per_page=1")"; then
+    if ! commits="$(repo_api_call "commits?path=$1&sha=${BRANCH}&page=1")"; then
         echo "cannot determine latest commit" >&2
         return 1
     fi
 
     local len
-    if ! len="$(echo "${commits}" | jq -r '. | length')"; then
-        echo "invalid commit reply from GitHub" >&2
+    if ! len="$(echo "${commits}" | jq -r '. | length')" || [[ ${len} -eq 0 ]]; then
+        echo "invalid commit reply from repo service" >&2
         return 1
     fi
 
-    if [[ ${len} -gt 0 ]]; then
-
-        local rd
-        if ! rd="$(echo "${commits}" | jq -r '.[0].commit.committer.date')" \
-            || [[ -z "${rd}" ]]; then
-            rd="$(date)"
-        fi
-
-        echo -e "$1 needs update (local date: ${ld}, remote date: ${rd}) ..."
-
-        local dir
-        dir="$(dirname "$1")"
-        [[ -z "${dir}" ]] || mkdir -p "${dir}"
-
-        local current="$1.current"
-        if curl -fsSL -o "${current}" "${BASE_URL}/${BRANCH}/$1"; then
-            # set to date of commit, but note that rd is in UTC, so we need to
-            # convert to local time
-            touch --date="$(date --date="${rd}" --iso-8601=seconds)" "${current}"
-            chmod +x "${current}"
-            [[ $# -gt 1 && "$2" == "copy" ]] || mv -f "${current}" "$1"
-            echo "$1 updated"
-        else
-            echo "download of $1 failed" >&2
-            rm -f "${current}"
-            return 1
-        fi
+    local rd
+    if rd="$(echo "${commits}" | jq -r '.[0].commit.committer.date')" \
+        && [[ -n "${rd}" ]]; then
+        # Codeberg returns commit times in local time, convert to UTC
+        rd="$(to_utc "${rd}")"
+    else
+        rd="$(to_utc)"
     fi
+
+    if [[ ! "${rd}" > "${ld}" ]]; then
+        return 0
+    fi
+
+    echo -e "$1 needs update (local date: ${ld}, remote date: ${rd}) ..."
+
+    local dir
+    dir="$(dirname "$1")"
+    [[ -z "${dir}" ]] || mkdir -p "${dir}"
+
+    local current="$1.current"
+    if curl -fsSL -o "${current}" "${BASE_URL}/${BRANCH}/$1"; then
+        # set to date of commit, but note that rd is in UTC, so we need to
+        # convert to local time
+        touch --date="$(date --date="${rd}" --iso-8601=seconds)" "${current}"
+        chmod +x "${current}"
+        [[ $# -gt 1 && "$2" == "copy" ]] || mv -f "${current}" "$1"
+        echo "$1 updated"
+    else
+        echo "download of $1 failed" >&2
+        rm -f "${current}"
+        return 1
+    fi
+}
+
+#
+# $1    date string to convert; optional, current time when dropped
+# $2    `ref` if $1 is a file path
+#
+function to_utc {
+    local d
+    if [[ -z "$1" ]]; then
+        d="$(date --utc --iso-8601=seconds)"
+    elif [[ $# -gt 1 && "$2" == "ref" ]]; then
+        d="$(date --reference="$1" --utc --iso-8601=seconds 2>/dev/null)" \
+            && [[ -n "${d}" ]] || return 1
+    else
+        d="$(date --date="$1" --utc --iso-8601=seconds)"
+    fi
+    echo -n "$(echo -n "${d}" | cut -d '+' -f 1)Z"
 }
 
 #
@@ -345,12 +361,17 @@ function assure_current {
 #
 function get_asset_url {
 
-    local path="releases/latest"
-    [[ -z "${VERSION}" || "${VERSION}" == "latest" ]] \
-        || path="releases/tags/${VERSION}"
+    # latest release; Codeberg does not accept `releases/latest`
+    local path="releases?draft=false&pre-release=false&limit=1"
+    local prefilter=".[0]"
 
-    github_api_call "${path}" 2>/dev/null \
-        | jq -r ".assets[]
+    if [[ -n "${VERSION}" && "${VERSION}" != "latest" ]]; then
+        path="releases/tags/${VERSION}"
+        prefilter=""
+    fi
+
+    repo_api_call "${path}" 2>/dev/null \
+        | jq -r "${prefilter}.assets[]
             | select(.name | contains(\"$1\"))
             | .browser_download_url"
 }
@@ -359,8 +380,8 @@ function get_asset_url {
 #
 #
 function get_latest_release {
-    github_api_call "releases/latest" 2>/dev/null \
-        | jq -r ".name"
+    repo_api_call "releases?draft=false&pre-release=false&limit=1" 2>/dev/null \
+        | jq -r ".[0].name"
 }
 
 #
@@ -375,9 +396,9 @@ function version_label {
 #
 # $1    path
 #
-function github_api_call {
-    curl -fsSL -H "Accept: application/vnd.github.v3+json" \
-        "https://api.github.com/repos/xelalexv/oqtadrive/$1"
+function repo_api_call {
+    curl -fsSL -H "accept: application/json" \
+        "https://codeberg.org/api/v1/repos/xelalexv/oqtadrive/$1"
 }
 
 #
