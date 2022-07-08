@@ -1,3 +1,8 @@
+# So long *GitHub*, and thanks for all the fish...
+This is the place where *OqtaDrive* used to anchor. It found [a new, more pleasant shore](https://codeberg.org/xelalexv/oqtadrive). Want to [set sail, too](https://sfconservancy.org/GiveUpGitHub/)?
+
+<a href="https://commons.wikimedia.org/w/index.php?curid=92204786"><img src="doc/aye.png" width="420"/></a>
+
 # OqtaDrive
 
 #### *Sinclair Microdrive* emulator for *Spectrum* & *QL*
